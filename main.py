@@ -1,150 +1,113 @@
 import cv2
-import pytesseract
-from tkinter import *
-from PIL import Image, ImageTk
 import numpy as np
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+def find_screen_roi(frame, min_area=15000):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(blurred, 50, 150)
+    contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-class TempMonitor:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Temp Monitor (Single ROI with Threshold Slider)")
+    best_roi = None
+    max_area = 0
 
-        self.cap = cv2.VideoCapture(0)
-        self.frame = None
-        self.screen_roi = None
-        self.zoomed_roi = None
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.02 * cv2.arcLength(cnt, True), True)
+        x, y, w, h = cv2.boundingRect(approx)
+        area = w * h
+        aspect = h / w if w > 0 else 0
 
-        self.canvas = Canvas(root, width=640, height=480)
-        self.canvas.grid(row=0, column=0, columnspan=2)
+        if len(approx) == 4 and area >= min_area and 1.2 < aspect < 2.5:
+            if area > max_area:
+                best_roi = (x, y, w, h)
+                max_area = area
 
-        Label(root, text="Tag:").grid(row=1, column=0)
-        self.tag = StringVar()
-        Entry(root, textvariable=self.tag).grid(row=1, column=1)
+    return best_roi
 
-        self.label = Label(root, text="Reading: -- °C", font=('Arial', 14))
-        self.label.grid(row=2, column=0, columnspan=2)
+def scale_and_pad(image, target_w, target_h):
+    """Scale image with aspect ratio and pad with black borders to fit the window."""
+    h, w = image.shape[:2]
+    scale = min(target_w / w, target_h / h)
+    new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(image, (new_w, new_h))
 
-        # Threshold slider
-        Label(root, text="Threshold:").grid(row=3, column=0)
-        self.threshold_value = IntVar(value=80)
-        Scale(root, from_=80, to=120, orient=HORIZONTAL, variable=self.threshold_value).grid(row=3, column=1)
+    top = (target_h - new_h) // 2
+    bottom = target_h - new_h - top
+    left = (target_w - new_w) // 2
+    right = target_w - new_w - left
 
-        self.drawing_screen = False
-        self.screen_start = (0, 0)
-        self.canvas.bind("<ButtonPress-1>", self.start_screen_roi)
-        self.canvas.bind("<B1-Motion>", self.draw_screen_roi_motion)
-        self.canvas.bind("<ButtonRelease-1>", self.finish_screen_roi)
+    padded = cv2.copyMakeBorder(resized, top, bottom, left, right,
+                                 borderType=cv2.BORDER_CONSTANT, value=(0, 0, 0))
 
-        # Zoomed-in view
-        self.zoom_window = Toplevel(root)
-        self.zoom_window.title("Zoomed Screen (Select ROI)")
-        self.zoom_canvas = Canvas(self.zoom_window, width=640, height=480)
-        self.zoom_canvas.pack()
+    return padded, scale, left, top
 
-        self.drawing_zoom = False
-        self.zoom_start = (0, 0)
-        self.zoom_canvas.bind("<ButtonPress-1>", self.start_zoom_roi)
-        self.zoom_canvas.bind("<B1-Motion>", self.draw_zoom_roi_motion)
-        self.zoom_canvas.bind("<ButtonRelease-1>", self.finish_zoom_roi)
+def main():
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        raise IOError("Cannot open webcam")
 
-        self.zoom_frame = None
-        self.update_frame()
+    cv2.namedWindow("Thermometer Screen ROI", cv2.WINDOW_NORMAL)
 
-    def start_screen_roi(self, event):
-        self.drawing_screen = True
-        self.screen_start = (event.x, event.y)
+    # Trackbars for adjustable subdivision cuts
+    cv2.createTrackbar("T1%", "Thermometer Screen ROI", 25, 99, lambda x: None)
+    cv2.createTrackbar("T2%", "Thermometer Screen ROI", 50, 99, lambda x: None)
+    cv2.createTrackbar("T3%", "Thermometer Screen ROI", 75, 99, lambda x: None)
 
-    def draw_screen_roi_motion(self, event):
-        if self.drawing_screen:
-            self.screen_end = (event.x, event.y)
+    screen_roi = None
 
-    def finish_screen_roi(self, event):
-        if not self.drawing_screen:
-            return
-        self.drawing_screen = False
-        x1, y1 = self.screen_start
-        x2, y2 = event.x, event.y
-        self.screen_roi = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
-        print(f"Screen ROI: {self.screen_roi}")
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-    def start_zoom_roi(self, event):
-        self.drawing_zoom = True
-        self.zoom_start = (event.x, event.y)
+            orig_h, orig_w = frame.shape[:2]
+            draw_frame = frame.copy()
 
-    def draw_zoom_roi_motion(self, event):
-        if self.drawing_zoom:
-            self.zoom_end = (event.x, event.y)
+            if screen_roi is None:
+                candidate = find_screen_roi(frame)
+                if candidate:
+                    screen_roi = candidate
+                    print(f"Locked ROI: {screen_roi}")
 
-    def finish_zoom_roi(self, event):
-        if not self.drawing_zoom:
-            return
-        self.drawing_zoom = False
-        x1, y1 = self.zoom_start
-        x2, y2 = event.x, event.y
-        self.zoomed_roi = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
-        print(f"Zoomed ROI: {self.zoomed_roi}")
+            # Draw ROI and subdivisions on original frame
+            if screen_roi:
+                x, y, w, h = screen_roi
 
-    def extract_temp(self, zoomed_frame):
-        x1, y1, x2, y2 = self.zoomed_roi
-        roi = zoomed_frame[y1:y2, x1:x2]
+                # Get subdivision percentages
+                t1 = cv2.getTrackbarPos("T1%", "Thermometer Screen ROI")
+                t2 = cv2.getTrackbarPos("T2%", "Thermometer Screen ROI")
+                t3 = cv2.getTrackbarPos("T3%", "Thermometer Screen ROI")
+                cuts = sorted([t1, t2, t3])
+                row_positions = [0] + cuts + [100]
 
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        gray = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+                # Draw screen border
+                cv2.rectangle(draw_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-        thresh_value = self.threshold_value.get()
-        _, thresh = cv2.threshold(blur, thresh_value, 255, cv2.THRESH_BINARY_INV)
+                # Draw subdivisions
+                for i in range(4):
+                    y1 = y + int(h * row_positions[i] / 100)
+                    y2 = y + int(h * row_positions[i + 1] / 100)
+                    cv2.rectangle(draw_frame, (x, y1), (x + w, y2), (255, 0, 0), 1)
+                    cv2.putText(draw_frame, f"T{i+1}", (x + 5, y1 + 20),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
-        kernel = np.ones((3, 3), np.uint8)
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            # Get actual display window size
+            try:
+                _, _, win_w, win_h = cv2.getWindowImageRect("Thermometer Screen ROI")
+            except:
+                win_w, win_h = 1280, 720  # fallback size
 
-        cv2.imshow("Debug View (Thresh)", thresh)
+            # Scale and pad to fill window while preserving aspect ratio
+            padded_frame, _, _, _ = scale_and_pad(draw_frame, win_w, win_h)
+            cv2.imshow("Thermometer Screen ROI", padded_frame)
 
-        config = r'--oem 3 --psm 7 -c tessedit_char_whitelist=0123456789.'
-        text = pytesseract.image_to_string(thresh, config=config)
-        clean = ''.join(c for c in text if c.isdigit() or c == '.')
+            key = cv2.waitKey(1)
+            if key == 27:  # ESC
+                break
 
-        print(f"OCR Raw: '{text.strip()}' | Clean: '{clean}'")
-
-        return clean if clean else "--"
-
-    def update_frame(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            return
-        frame = cv2.resize(frame, (640, 480))
-        self.frame = frame.copy()
-
-        if self.screen_roi:
-            x1, y1, x2, y2 = self.screen_roi
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-            screen_crop = self.frame[y1:y2, x1:x2]
-            zoomed = cv2.resize(screen_crop, (640, 480), interpolation=cv2.INTER_NEAREST)
-            self.zoom_frame = zoomed.copy()
-
-            if self.zoomed_roi:
-                zx1, zy1, zx2, zy2 = self.zoomed_roi
-                cv2.rectangle(zoomed, (zx1, zy1), (zx2, zy2), (0, 255, 0), 2)
-                reading = self.extract_temp(self.zoom_frame)
-                tag = self.tag.get() or "Temp"
-                self.label.config(text=f"{tag}: {reading} °C")
-
-            img_zoom = cv2.cvtColor(zoomed, cv2.COLOR_BGR2RGB)
-            img_zoom = ImageTk.PhotoImage(Image.fromarray(img_zoom))
-            self.zoom_canvas.create_image(0, 0, anchor=NW, image=img_zoom)
-            self.zoom_canvas.image = img_zoom
-
-        img_main = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img_main = ImageTk.PhotoImage(Image.fromarray(img_main))
-        self.canvas.create_image(0, 0, anchor=NW, image=img_main)
-        self.canvas.image = img_main
-
-        self.root.after(200, self.update_frame)
-
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    root = Tk()
-    app = TempMonitor(root)
-    root.mainloop()
+    main()
