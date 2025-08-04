@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import os
 
 def find_screen_roi(frame, min_area=15000):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -23,23 +24,22 @@ def find_screen_roi(frame, min_area=15000):
 
     return best_roi
 
-def scale_and_pad(image, target_w, target_h):
-    """Scale image with aspect ratio and pad with black borders to fit the window."""
+def letterbox_image(image, target_width, target_height):
     h, w = image.shape[:2]
-    scale = min(target_w / w, target_h / h)
+    scale = min(target_width / w, target_height / h)
     new_w, new_h = int(w * scale), int(h * scale)
     resized = cv2.resize(image, (new_w, new_h))
 
-    top = (target_h - new_h) // 2
-    bottom = target_h - new_h - top
-    left = (target_w - new_w) // 2
-    right = target_w - new_w - left
+    top = (target_height - new_h) // 2
+    bottom = target_height - new_h - top
+    left = (target_width - new_w) // 2
+    right = target_width - new_w - left
 
     padded = cv2.copyMakeBorder(resized, top, bottom, left, right,
-                                 borderType=cv2.BORDER_CONSTANT, value=(0, 0, 0))
+                                 cv2.BORDER_CONSTANT, value=(0, 0, 0))
+    return padded
 
-    return padded, scale, left, top
-
+# -------------------- Main --------------------
 def main():
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     if not cap.isOpened():
@@ -47,7 +47,6 @@ def main():
 
     cv2.namedWindow("Thermometer Screen ROI", cv2.WINDOW_NORMAL)
 
-    # Trackbars for adjustable subdivision cuts
     cv2.createTrackbar("T1%", "Thermometer Screen ROI", 25, 99, lambda x: None)
     cv2.createTrackbar("T2%", "Thermometer Screen ROI", 50, 99, lambda x: None)
     cv2.createTrackbar("T3%", "Thermometer Screen ROI", 75, 99, lambda x: None)
@@ -60,50 +59,75 @@ def main():
             if not ret:
                 break
 
-            orig_h, orig_w = frame.shape[:2]
-            draw_frame = frame.copy()
-
             if screen_roi is None:
                 candidate = find_screen_roi(frame)
                 if candidate:
                     screen_roi = candidate
                     print(f"Locked ROI: {screen_roi}")
 
-            # Draw ROI and subdivisions on original frame
+            display = frame.copy()
+
             if screen_roi:
                 x, y, w, h = screen_roi
 
-                # Get subdivision percentages
+                # Subdivision slider positions
                 t1 = cv2.getTrackbarPos("T1%", "Thermometer Screen ROI")
                 t2 = cv2.getTrackbarPos("T2%", "Thermometer Screen ROI")
                 t3 = cv2.getTrackbarPos("T3%", "Thermometer Screen ROI")
                 cuts = sorted([t1, t2, t3])
                 row_positions = [0] + cuts + [100]
 
-                # Draw screen border
-                cv2.rectangle(draw_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                # Draw screen box
+                cv2.rectangle(display, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
                 # Draw subdivisions
                 for i in range(4):
                     y1 = y + int(h * row_positions[i] / 100)
                     y2 = y + int(h * row_positions[i + 1] / 100)
-                    cv2.rectangle(draw_frame, (x, y1), (x + w, y2), (255, 0, 0), 1)
-                    cv2.putText(draw_frame, f"T{i+1}", (x + 5, y1 + 20),
+                    cv2.rectangle(display, (x, y1), (x + w, y2), (255, 0, 0), 1)
+                    cv2.putText(display, f"T{i+1}", (x + 5, y1 + 20),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
-            # Get actual display window size
+            # Resize display output without distorting the drawn boxes
             try:
                 _, _, win_w, win_h = cv2.getWindowImageRect("Thermometer Screen ROI")
             except:
-                win_w, win_h = 1280, 720  # fallback size
+                win_w, win_h = 1280, 720
 
-            # Scale and pad to fill window while preserving aspect ratio
-            padded_frame, _, _, _ = scale_and_pad(draw_frame, win_w, win_h)
-            cv2.imshow("Thermometer Screen ROI", padded_frame)
+            padded_display = letterbox_image(display, win_w, win_h)
+            cv2.imshow("Thermometer Screen ROI", padded_display)
 
             key = cv2.waitKey(1)
+
             if key == 27:  # ESC
                 break
+
+            elif key == ord('s') and screen_roi:
+                print("[+] Saving training images...")
+                x, y, w, h = screen_roi
+                t1 = cv2.getTrackbarPos("T1%", "Thermometer Screen ROI")
+                t2 = cv2.getTrackbarPos("T2%", "Thermometer Screen ROI")
+                t3 = cv2.getTrackbarPos("T3%", "Thermometer Screen ROI")
+                cuts = sorted([t1, t2, t3])
+                row_positions = [0] + cuts + [100]
+
+                for i in range(4):
+                    y1 = y + int(h * row_positions[i] / 100)
+                    y2 = y + int(h * row_positions[i + 1] / 100)
+                    cropped = frame[y1:y2, x:x+w]
+                    cv2.imshow("Digit", cropped)
+                    label = input(f"Label for T{i+1} (0–9 or skip): ")
+                    cv2.destroyWindow("Digit")
+
+                    if label.isdigit() and 0 <= int(label) <= 9:
+                        path = f"dataset/{label}/"
+                        os.makedirs(path, exist_ok=True)
+                        count = len(os.listdir(path))
+                        filename = f"{path}/{count:04}.png"
+                        cv2.imwrite(filename, cropped)
+                        print(f"Saved to {filename}")
+                    else:
+                        print("Skipped.")
 
     finally:
         cap.release()
