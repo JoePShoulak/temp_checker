@@ -115,19 +115,19 @@ def main():
                     y1 = y + int(h * row_positions[i] / 100)
                     y2 = y + int(h * row_positions[i + 1] / 100)
                     cropped = frame[y1:y2, x:x+w]
-                    cv2.imshow("Digit", cropped)
-                    label = input(f"Label for T{i+1} (0–9 or skip): ")
-                    cv2.destroyWindow("Digit")
+                    cv2.imshow(f"T{i+1} Reading", cropped)
+                    label = input(f"Enter full temperature for T{i+1} (e.g. 302.4), or blank to skip: ")
+                    cv2.destroyWindow(f"T{i+1} Reading")
 
-                    if label.isdigit() and 0 <= int(label) <= 9:
-                        path = f"dataset/{label}/"
-                        os.makedirs(path, exist_ok=True)
-                        count = len(os.listdir(path))
-                        filename = f"{path}/{count:04}.png"
+                    if label:
+                        folder = f"dataset/T{i+1}/"
+                        os.makedirs(folder, exist_ok=True)
+                        count = len(os.listdir(folder))
+                        filename = f"{folder}/{count:04}_{label}.png"
                         cv2.imwrite(filename, cropped)
-                        print(f"Saved to {filename}")
+                        print(f"Saved: {filename}")
                     else:
-                        print("Skipped.")
+                        print(f"Skipped T{i+1}")
 
     finally:
         cap.release()
