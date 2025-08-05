@@ -36,9 +36,9 @@ def draw_screen_roi(frame, roi):
         cv2.rectangle(frame, (x, y), (x + w, y + h), ROI_COLOR, 2)
         return frame[y:y + h, x:x + w]
 
-def preprocess_digit_roi(roi):
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    resized = cv2.resize(gray, (roi.shape[1]*2, roi.shape[0]*2))
+def preprocess_digit_roi(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    resized = cv2.resize(gray, (frame.shape[1]*2, frame.shape[0]*2))
 
     # Adaptive thresholding
     binary = cv2.adaptiveThreshold(
@@ -50,7 +50,7 @@ def preprocess_digit_roi(roi):
         C=2
     )
 
-    # Remove small white specks (noise)
+    # Reduce noise
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
     cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
 
