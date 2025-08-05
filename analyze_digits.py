@@ -61,10 +61,6 @@ boxes = [
     if MIN_AREA <= area <= MAX_AREA
 ]
 
-print("\n[Original Box Areas]")
-for i, box in enumerate(boxes):
-    print(f"[{i+1}] area: {box_area(box)}")
-
 # Merge overlapping and close boxes
 boxes = merge_boxes_by_condition(boxes, overlaps)
 boxes = merge_boxes_by_condition(boxes, lambda a, b: is_close(a, b, MERGE_DISTANCE))
@@ -72,13 +68,11 @@ boxes = merge_boxes_by_condition(boxes, lambda a, b: is_close(a, b, MERGE_DISTAN
 # Final filtering
 filtered_boxes = [b for b in boxes if box_area(b) >= FINAL_MIN_AREA]
 
-print("\n[Final Filtered Box Areas]")
 output = img.copy()
 for i, box in enumerate(filtered_boxes):
     x1, y1, x2, y2 = box
     area = box_area(box)
     cv2.rectangle(output, (x1, y1), (x2, y2), (0, 255, 0), 1)
-    print(f"[{i+1}] area: {area}")
 
 # Show result
 cv2.imshow("Filtered Merged Digit Boxes", output)
