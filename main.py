@@ -1,34 +1,22 @@
 import cv2
 
-# Open the default webcam
+# Open the webcam (0 = default camera)
 cap = cv2.VideoCapture(0)
 
+# Check that it works
 if not cap.isOpened():
-    print("Error: Could not open webcam.")
+    print("Error: Cannot access webcam")
     exit()
 
 while True:
     ret, frame = cap.read()
     if not ret:
-        print("Error: Could not read frame.")
         break
 
-    # Display the raw feed
-    cv2.imshow("Live View", frame)
+    cv2.imshow("Webcam Feed", frame)
 
-    # Convert to grayscale
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    # Apply Canny edge detection
-    edges = cv2.Canny(gray, 100, 200)
-
-    # Show the processed frame
-    cv2.imshow("Algorithm View", edges)
-
-    # Exit on pressing 'q'
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Cleanup
 cap.release()
 cv2.destroyAllWindows()
