@@ -1,18 +1,19 @@
 import cv2
+import numpy as np
 
 def draw_reticle(frame):
-    RETICLE_COLOR = (0, 0, 255) # red
+    RETICLE_COLOR = (0, 0, 255)  # red
     RETICLE_SIZE = 5
-    RETICLE_THICKNESS = -1 # filled
+    RETICLE_THICKNESS = -1  # filled
     height, width = frame.shape[:2]
     center_x, center_y = width // 2, height // 2
-    cv2.circle(frame, (center_x, center_y), radius=RETICLE_SIZE, color=RETICLE_COLOR, thickness=-RETICLE_THICKNESS)
+    cv2.circle(frame, (center_x, center_y), radius=RETICLE_SIZE, color=RETICLE_COLOR, thickness=RETICLE_THICKNESS)
 
 def preprocess(frame):
     BLUR_SIZE = 5
     SIGMA_X = 0
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # grayscale
-    return cv2.GaussianBlur(frame, (BLUR_SIZE, BLUR_SIZE), SIGMA_X) # blur to reduce noise
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # grayscale
+    return cv2.GaussianBlur(frame, (BLUR_SIZE, BLUR_SIZE), SIGMA_X)  # blur to reduce noise
 
 def make_contours(frame):
     THRESH_MIN = 25
@@ -21,7 +22,6 @@ def make_contours(frame):
 
 def find_screen_roi(frame):
     contours, _ = cv2.findContours(frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
     height, width = frame.shape[:2]
     center_point = (width // 2, height // 2)
 
@@ -29,14 +29,14 @@ def find_screen_roi(frame):
         if cv2.pointPolygonTest(cnt, center_point, measureDist=False) >= 0:
             x, y, w, h = cv2.boundingRect(cnt)
             return (x, y, w, h)
-        
-def draw_screen_roi(frame, roi):
-        ROI_COLOR = (0, 255, 0) # green
-        x, y, w, h = roi
-        cv2.rectangle(frame, (x, y), (x + w, y + h), ROI_COLOR, 2)
-        return frame[y:y + h, x:x + w]
 
-def preprocess_digit_roi(frame):
+def draw_screen_roi(frame, roi):
+    ROI_COLOR = (0, 255, 0)  # green
+    x, y, w, h = roi
+    cv2.rectangle(frame, (x, y), (x + w, y + h), ROI_COLOR, 2)
+    return frame[y:y + h, x:x + w]
+
+def preprocess_screen_roi(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     resized = cv2.resize(gray, (frame.shape[1]*2, frame.shape[0]*2))
 
@@ -56,6 +56,7 @@ def preprocess_digit_roi(frame):
 
     return cleaned
 
+
 ######## MAIN ########
 def main():
     screen_roi = None
@@ -72,19 +73,20 @@ def main():
         preprocessed = preprocess(frame)
         edges = make_contours(preprocessed)
         cropped = None
+        screen = None
 
         if not screen_roi: screen_roi = find_screen_roi(edges)
         if screen_roi: cropped = draw_screen_roi(frame, screen_roi)
 
         if cropped is not None:
-            processed_digits = preprocess_digit_roi(cropped)
-            cv2.imshow("Processed Digits", processed_digits)
+            screen = preprocess_screen_roi(cropped)
 
         draw_reticle(frame)
         cv2.imshow("Original", frame)
         cv2.imshow("Preprocessed", preprocessed)
         cv2.imshow("Edges", edges)
         if cropped is not None: cv2.imshow("Screen ROI", cropped)
+        if screen is not None: cv2.imshow("Screen ROI Preprocessed", screen)
 
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
