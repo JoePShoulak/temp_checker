@@ -19,7 +19,7 @@ def make_contours(frame):
     THRESH_MAX = 150
     return cv2.Canny(frame, THRESH_MIN, THRESH_MAX)
 
-def find_roi(frame):
+def find_screen_roi(frame):
     contours, _ = cv2.findContours(frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     height, width = frame.shape[:2]
@@ -30,15 +30,35 @@ def find_roi(frame):
             x, y, w, h = cv2.boundingRect(cnt)
             return (x, y, w, h)
         
-def draw_roi(frame, roi):
+def draw_screen_roi(frame, roi):
         ROI_COLOR = (0, 255, 0) # green
         x, y, w, h = roi
         cv2.rectangle(frame, (x, y), (x + w, y + h), ROI_COLOR, 2)
         return frame[y:y + h, x:x + w]
 
+def preprocess_digit_roi(roi):
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    resized = cv2.resize(gray, (roi.shape[1]*2, roi.shape[0]*2))
+
+    # Adaptive thresholding
+    binary = cv2.adaptiveThreshold(
+        resized,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        blockSize=11,
+        C=2
+    )
+
+    # Remove small white specks (noise)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+
+    return cleaned
+
 ######## MAIN ########
 def main():
-    roi = None
+    screen_roi = None
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -49,14 +69,18 @@ def main():
         ret, frame = cap.read()
         if not ret: break
 
-        draw_reticle(frame)
         preprocessed = preprocess(frame)
         edges = make_contours(preprocessed)
         cropped = None
 
-        if not roi: roi = find_roi(edges)
-        if roi: cropped = draw_roi(frame, roi)
+        if not screen_roi: screen_roi = find_screen_roi(edges)
+        if screen_roi: cropped = draw_screen_roi(frame, screen_roi)
 
+        if cropped is not None:
+            processed_digits = preprocess_digit_roi(cropped)
+            cv2.imshow("Processed Digits", processed_digits)
+
+        draw_reticle(frame)
         cv2.imshow("Original", frame)
         cv2.imshow("Preprocessed", preprocessed)
         cv2.imshow("Edges", edges)
