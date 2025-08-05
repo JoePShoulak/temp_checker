@@ -1,24 +1,4 @@
 import cv2
-import numpy as np
-
-# Load image
-img = cv2.imread("screen.png")
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-# Threshold to isolate white digits
-_, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-
-# Connected components detection
-num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
-
-# Store valid boxes
-MIN_AREA = 60
-MAX_AREA = 1000
-boxes = []
-for i in range(1, num_labels):  # skip background
-    x, y, w, h, area = stats[i]
-    if MIN_AREA <= area <= MAX_AREA:
-        boxes.append([x, y, x + w, y + h])  # (x1, y1, x2, y2)
 
 # Merge overlapping boxes
 def do_overlap(a, b):
@@ -45,6 +25,26 @@ def merge_boxes(boxes):
                 i += 1
         merged.append(base)
     return merged
+
+
+# Load image
+img = cv2.imread("screen.png")
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+# Threshold to isolate white digits
+_, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+
+# Connected components detection
+num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+
+# Store valid boxes
+MIN_AREA = 60
+MAX_AREA = 1000
+boxes = []
+for i in range(1, num_labels):  # skip background
+    x, y, w, h, area = stats[i]
+    if MIN_AREA <= area <= MAX_AREA:
+        boxes.append([x, y, x + w, y + h])  # (x1, y1, x2, y2)
 
 merged_boxes = merge_boxes(boxes)
 
