@@ -89,96 +89,116 @@ def has_white_between_dots(gray, top, bottom):
             return True
     return False
 
-# ---------------- Main ----------------
 
-img = cv2.imread("screen.png")
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-_, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-num_labels, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+def analyze_digits(gray):
+    """Detect seven-segment digits in a grayscale or binary image.
 
-# Initial bounding boxes
-boxes = [
-    [x, y, x + w, y + h]
-    for x, y, w, h, area in stats[1:]
-    if MIN_AREA <= area <= MAX_AREA
-]
+    Parameters
+    ----------
+    gray : np.ndarray
+        Grayscale or binary image containing the digits.
 
-# Merge overlapping and close boxes
-boxes = merge_boxes_by_condition(boxes, overlaps)
-boxes = merge_boxes_by_condition(boxes, lambda a, b: is_close(a, b, MERGE_DISTANCE))
+    Returns
+    -------
+    tuple[list[float], np.ndarray]
+        A tuple of detected numeric values (each divided by 10 as in the
+        original script) and an output image with bounding boxes drawn.
+    """
 
-# Final filtering
-filtered_boxes = [b for b in boxes if box_area(b) >= FINAL_MIN_AREA]
+    # Ensure binary image for component analysis
+    _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
 
-# Sort all boxes top-to-bottom, then left-to-right
-filtered_boxes.sort(key=lambda b: (b[1], b[0]))
+    # Initial bounding boxes
+    boxes = [
+        [x, y, x + w, y + h]
+        for x, y, w, h, area in stats[1:]
+        if MIN_AREA <= area <= MAX_AREA
+    ]
 
-# Remove the first box globally
-if filtered_boxes:
-    filtered_boxes = filtered_boxes[1:]
+    # Merge overlapping and close boxes
+    boxes = merge_boxes_by_condition(boxes, overlaps)
+    boxes = merge_boxes_by_condition(boxes, lambda a, b: is_close(a, b, MERGE_DISTANCE))
 
-# Group remaining boxes into rows
-rows = []
-for box in filtered_boxes:
-    x1, y1, x2, y2 = box
-    placed = False
-    for row in rows:
-        if abs(y1 - row[0][1]) <= ROW_Y_TOLERANCE:
-            row.append(box)
-            placed = True
-            break
-    if not placed:
-        rows.append([box])
+    # Final filtering
+    filtered_boxes = [b for b in boxes if box_area(b) >= FINAL_MIN_AREA]
 
-# Draw boxes on image
-output = img.copy()
-for box in filtered_boxes:
-    x1, y1, x2, y2 = box
-    cv2.rectangle(output, (x1, y1), (x2, y2), (0, 255, 0), 1)
+    # Sort all boxes top-to-bottom, then left-to-right
+    filtered_boxes.sort(key=lambda b: (b[1], b[0]))
 
-# Process and print results row-by-row
-for row in rows:
-    row.sort(key=lambda b: b[0])  # sort left to right
-    number_str = ""
-    for box in row:
+    # Remove the first box globally
+    if filtered_boxes:
+        filtered_boxes = filtered_boxes[1:]
+
+    # Group remaining boxes into rows
+    rows = []
+    for box in filtered_boxes:
         x1, y1, x2, y2 = box
-        cx = (x1 + x2) // 2
-        top_y = y1 + (y2 - y1) // 3
-        bot_y = y1 + 2 * (y2 - y1) // 3
-        top_dot = (cx, top_y)
-        bot_dot = (cx, bot_y)
+        placed = False
+        for row in rows:
+            if abs(y1 - row[0][1]) <= ROW_Y_TOLERANCE:
+                row.append(box)
+                placed = True
+                break
+        if not placed:
+            rows.append([box])
 
-        # Segment detections via cardinal lines
-        top_up = has_white_pixels_along_line(gray, top_dot, "up", (x1, y1, x2, y2))
-        top_left = has_white_pixels_along_line(gray, top_dot, "left", (x1, y1, x2, y2))
-        top_right = has_white_pixels_along_line(gray, top_dot, "right", (x1, y1, x2, y2))
+    # Prepare output image
+    output = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    for box in filtered_boxes:
+        x1, y1, x2, y2 = box
+        cv2.rectangle(output, (x1, y1), (x2, y2), (0, 255, 0), 1)
 
-        bot_down = has_white_pixels_along_line(gray, bot_dot, "down", (x1, y1, x2, y2))
-        bot_left = has_white_pixels_along_line(gray, bot_dot, "left", (x1, y1, x2, y2))
-        bot_right = has_white_pixels_along_line(gray, bot_dot, "right", (x1, y1, x2, y2))
+    results = []
+    for row in rows:
+        row.sort(key=lambda b: b[0])  # sort left to right
+        number_str = ""
+        for box in row:
+            x1, y1, x2, y2 = box
+            cx = (x1 + x2) // 2
+            top_y = y1 + (y2 - y1) // 3
+            bot_y = y1 + 2 * (y2 - y1) // 3
+            top_dot = (cx, top_y)
+            bot_dot = (cx, bot_y)
 
-        center = has_white_between_dots(gray, top_dot, bot_dot)
+            # Segment detections via cardinal lines
+            top_up = has_white_pixels_along_line(gray, top_dot, "up", (x1, y1, x2, y2))
+            top_left = has_white_pixels_along_line(gray, top_dot, "left", (x1, y1, x2, y2))
+            top_right = has_white_pixels_along_line(gray, top_dot, "right", (x1, y1, x2, y2))
 
-        bitstring = (
-            ("1" if top_up else "0") +
-            ("1" if top_right else "0") +
-            ("1" if bot_right else "0") +
-            ("1" if bot_down else "0") +
-            ("1" if bot_left else "0") +
-            ("1" if top_left else "0") +
-            ("1" if center else "0")
-        )
-        digit = SEGMENT_DIGITS.get(bitstring, "?")
-        number_str += digit
+            bot_down = has_white_pixels_along_line(gray, bot_dot, "down", (x1, y1, x2, y2))
+            bot_left = has_white_pixels_along_line(gray, bot_dot, "left", (x1, y1, x2, y2))
+            bot_right = has_white_pixels_along_line(gray, bot_dot, "right", (x1, y1, x2, y2))
 
-    # Convert to number and divide by 10
-    if "?" not in number_str and number_str:
-        result = int(number_str) / 10
-        print(result)
-    else:
-        print("?", number_str)
+            center = has_white_between_dots(gray, top_dot, bot_dot)
 
-# Show image with bounding boxes
-cv2.imshow("Final Digit Bounding Boxes", output)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+            bitstring = (
+                ("1" if top_up else "0") +
+                ("1" if top_right else "0") +
+                ("1" if bot_right else "0") +
+                ("1" if bot_down else "0") +
+                ("1" if bot_left else "0") +
+                ("1" if top_left else "0") +
+                ("1" if center else "0")
+            )
+            digit = SEGMENT_DIGITS.get(bitstring, "?")
+            number_str += digit
+
+        # Convert to number and divide by 10
+        if "?" not in number_str and number_str:
+            results.append(int(number_str) / 10)
+        else:
+            results.append(None)
+
+    return results, output
+
+
+if __name__ == "__main__":
+    img = cv2.imread("screen.png")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    values, output = analyze_digits(gray)
+    for v in values:
+        print(v if v is not None else "?")
+    cv2.imshow("Final Digit Bounding Boxes", output)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()

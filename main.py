@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import analyze_digits
 
 def draw_reticle(frame):
     RETICLE_COLOR = (0, 0, 255)  # red
@@ -81,12 +82,21 @@ def main():
         if cropped is not None:
             screen = preprocess_screen_roi(cropped)
 
+        if screen is not None:
+            values, digits_img = analyze_digits.analyze_digits(screen)
+            for v in values:
+                if v is not None:
+                    print(v)
+            cv2.imshow("Digits Detected", digits_img)
+
         draw_reticle(frame)
         cv2.imshow("Original", frame)
         cv2.imshow("Preprocessed", preprocessed)
         cv2.imshow("Edges", edges)
-        if cropped is not None: cv2.imshow("Screen ROI", cropped)
-        if screen is not None: cv2.imshow("Screen ROI Preprocessed", screen)
+        if cropped is not None:
+            cv2.imshow("Screen ROI", cropped)
+        if screen is not None:
+            cv2.imshow("Screen ROI Preprocessed", screen)
 
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
