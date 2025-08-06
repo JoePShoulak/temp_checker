@@ -63,9 +63,37 @@ def preprocess_screen_roi(frame):
 def main():
     screen_roi = None
 
-    # Tkinter window setup for displaying row readings
+    # Tkinter window setup
     root = tk.Tk()
     root.title("Temperatures")
+
+    controls = tk.Frame(root)
+    controls.pack(side="top", fill="x")
+    values_frame = tk.Frame(root)
+    values_frame.pack(side="top", anchor="w")
+
+    params_vars = {
+        "white_threshold": tk.IntVar(value=200),
+        "row_y_tol": tk.IntVar(value=10),
+        "final_min_area": tk.IntVar(value=200),
+        "min_area": tk.IntVar(value=60),
+        "max_area": tk.IntVar(value=1000),
+        "merge_distance": tk.IntVar(value=5),
+    }
+
+    tk.Scale(controls, label="White Threshold", from_=0, to=255, orient="horizontal",
+             variable=params_vars["white_threshold"]).pack(fill="x")
+    tk.Scale(controls, label="Row Y Tolerance", from_=0, to=50, orient="horizontal",
+             variable=params_vars["row_y_tol"]).pack(fill="x")
+    tk.Scale(controls, label="Final Min Area", from_=0, to=1000, orient="horizontal",
+             variable=params_vars["final_min_area"]).pack(fill="x")
+    tk.Scale(controls, label="Min Area", from_=0, to=500, orient="horizontal",
+             variable=params_vars["min_area"]).pack(fill="x")
+    tk.Scale(controls, label="Max Area", from_=0, to=2000, orient="horizontal",
+             variable=params_vars["max_area"]).pack(fill="x")
+    tk.Scale(controls, label="Merge Distance", from_=0, to=50, orient="horizontal",
+             variable=params_vars["merge_distance"]).pack(fill="x")
+
     labels: list[tk.Label] = []
 
     cap = cv2.VideoCapture(0)
@@ -93,11 +121,19 @@ def main():
             screen = preprocess_screen_roi(cropped)
 
         if screen is not None:
-            values, digits_img = analyze_digits.analyze_digits(screen)
+            params = analyze_digits.DigitParams(
+                min_area=params_vars["min_area"].get(),
+                max_area=params_vars["max_area"].get(),
+                final_min_area=params_vars["final_min_area"].get(),
+                merge_distance=params_vars["merge_distance"].get(),
+                white_threshold=params_vars["white_threshold"].get(),
+                row_y_tolerance=params_vars["row_y_tol"].get(),
+            )
+            values, digits_img = analyze_digits.analyze_digits(screen, params)
 
             # Ensure there are enough labels for each row
             while len(labels) < len(values):
-                lbl = tk.Label(root, text="", font=("Arial", 16))
+                lbl = tk.Label(values_frame, text="", font=("Arial", 16))
                 lbl.pack(anchor="w")
                 labels.append(lbl)
 

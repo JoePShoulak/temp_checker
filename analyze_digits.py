@@ -1,14 +1,17 @@
 import cv2
 import numpy as np
+from dataclasses import dataclass
 
-# ---------------- Parameters ----------------
-MIN_AREA = 60
-MAX_AREA = 1000
-FINAL_MIN_AREA = 200
-MERGE_DISTANCE = 5
-WHITE_THRESHOLD = 200
-ROW_Y_TOLERANCE = 10  # pixels to consider same row
-# --------------------------------------------
+
+@dataclass
+class DigitParams:
+    """Parameters controlling digit extraction."""
+    min_area: int = 60
+    max_area: int = 1000
+    final_min_area: int = 200
+    merge_distance: int = 5
+    white_threshold: int = 200
+    row_y_tolerance: int = 10  # pixels to consider same row
 
 # Segment bitstring -> digit
 SEGMENT_DIGITS = {
@@ -52,51 +55,53 @@ def overlaps(a, b):
     bx1, by1, bx2, by2 = b
     return not (ax2 < bx1 or ax1 > bx2 or ay2 < by1 or ay1 > by2)
 
-def is_close(a, b, dist=MERGE_DISTANCE):
+def is_close(a, b, dist):
     ax1, ay1, ax2, ay2 = a
     bx1, by1, bx2, by2 = b
     dx = max(bx1 - ax2, ax1 - bx2, 0)
     dy = max(by1 - ay2, ay1 - by2, 0)
     return np.hypot(dx, dy) <= dist
 
-def has_white_pixels_along_line(gray, start, direction, bounds):
+def has_white_pixels_along_line(gray, start, direction, bounds, threshold):
     x, y = start
     x1, y1, x2, y2 = bounds
     if direction == "up":
         for yy in range(y, y1 - 1, -1):
-            if gray[yy, x] > WHITE_THRESHOLD:
+            if gray[yy, x] > threshold:
                 return True
     elif direction == "down":
         for yy in range(y, y2):
-            if gray[yy, x] > WHITE_THRESHOLD:
+            if gray[yy, x] > threshold:
                 return True
     elif direction == "left":
         for xx in range(x, x1 - 1, -1):
-            if gray[y, xx] > WHITE_THRESHOLD:
+            if gray[y, xx] > threshold:
                 return True
     elif direction == "right":
         for xx in range(x, x2):
-            if gray[y, xx] > WHITE_THRESHOLD:
+            if gray[y, xx] > threshold:
                 return True
     return False
 
-def has_white_between_dots(gray, top, bottom):
+def has_white_between_dots(gray, top, bottom, threshold):
     cx = top[0]
     y1 = top[1]
     y2 = bottom[1]
     for y in range(y1, y2 + 1):
-        if gray[y, cx] > WHITE_THRESHOLD:
+        if gray[y, cx] > threshold:
             return True
     return False
 
 
-def analyze_digits(gray):
+def analyze_digits(gray, params: DigitParams = DigitParams()):
     """Detect seven-segment digits in a grayscale or binary image.
 
     Parameters
     ----------
     gray : np.ndarray
         Grayscale or binary image containing the digits.
+    params : DigitParams, optional
+        Tuning parameters for the detection algorithm.
 
     Returns
     -------
@@ -106,22 +111,22 @@ def analyze_digits(gray):
     """
 
     # Ensure binary image for component analysis
-    _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+    _, binary = cv2.threshold(gray, params.white_threshold, 255, cv2.THRESH_BINARY)
     num_labels, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
 
     # Initial bounding boxes
     boxes = [
         [x, y, x + w, y + h]
         for x, y, w, h, area in stats[1:]
-        if MIN_AREA <= area <= MAX_AREA
+        if params.min_area <= area <= params.max_area
     ]
 
     # Merge overlapping and close boxes
     boxes = merge_boxes_by_condition(boxes, overlaps)
-    boxes = merge_boxes_by_condition(boxes, lambda a, b: is_close(a, b, MERGE_DISTANCE))
+    boxes = merge_boxes_by_condition(boxes, lambda a, b: is_close(a, b, params.merge_distance))
 
     # Final filtering
-    filtered_boxes = [b for b in boxes if box_area(b) >= FINAL_MIN_AREA]
+    filtered_boxes = [b for b in boxes if box_area(b) >= params.final_min_area]
 
     # Sort all boxes top-to-bottom, then left-to-right
     filtered_boxes.sort(key=lambda b: (b[1], b[0]))
@@ -136,7 +141,7 @@ def analyze_digits(gray):
         x1, y1, x2, y2 = box
         placed = False
         for row in rows:
-            if abs(y1 - row[0][1]) <= ROW_Y_TOLERANCE:
+            if abs(y1 - row[0][1]) <= params.row_y_tolerance:
                 row.append(box)
                 placed = True
                 break
@@ -162,15 +167,29 @@ def analyze_digits(gray):
             bot_dot = (cx, bot_y)
 
             # Segment detections via cardinal lines
-            top_up = has_white_pixels_along_line(gray, top_dot, "up", (x1, y1, x2, y2))
-            top_left = has_white_pixels_along_line(gray, top_dot, "left", (x1, y1, x2, y2))
-            top_right = has_white_pixels_along_line(gray, top_dot, "right", (x1, y1, x2, y2))
+            top_up = has_white_pixels_along_line(
+                gray, top_dot, "up", (x1, y1, x2, y2), params.white_threshold
+            )
+            top_left = has_white_pixels_along_line(
+                gray, top_dot, "left", (x1, y1, x2, y2), params.white_threshold
+            )
+            top_right = has_white_pixels_along_line(
+                gray, top_dot, "right", (x1, y1, x2, y2), params.white_threshold
+            )
 
-            bot_down = has_white_pixels_along_line(gray, bot_dot, "down", (x1, y1, x2, y2))
-            bot_left = has_white_pixels_along_line(gray, bot_dot, "left", (x1, y1, x2, y2))
-            bot_right = has_white_pixels_along_line(gray, bot_dot, "right", (x1, y1, x2, y2))
+            bot_down = has_white_pixels_along_line(
+                gray, bot_dot, "down", (x1, y1, x2, y2), params.white_threshold
+            )
+            bot_left = has_white_pixels_along_line(
+                gray, bot_dot, "left", (x1, y1, x2, y2), params.white_threshold
+            )
+            bot_right = has_white_pixels_along_line(
+                gray, bot_dot, "right", (x1, y1, x2, y2), params.white_threshold
+            )
 
-            center = has_white_between_dots(gray, top_dot, bot_dot)
+            center = has_white_between_dots(
+                gray, top_dot, bot_dot, params.white_threshold
+            )
 
             bitstring = (
                 ("1" if top_up else "0") +
@@ -196,7 +215,8 @@ def analyze_digits(gray):
 if __name__ == "__main__":
     img = cv2.imread("screen.png")
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    values, output = analyze_digits(gray)
+    params = DigitParams()
+    values, output = analyze_digits(gray, params)
     for v in values:
         print(v if v is not None else "?")
     cv2.imshow("Final Digit Bounding Boxes", output)
