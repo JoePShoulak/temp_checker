@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import tkinter as tk
 import analyze_digits
 
 def draw_reticle(frame):
@@ -62,31 +63,53 @@ def preprocess_screen_roi(frame):
 def main():
     screen_roi = None
 
+    # Tkinter window setup for displaying row readings
+    root = tk.Tk()
+    root.title("Temperatures")
+    labels: list[tk.Label] = []
+
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Error: Cannot access webcam. Is it in use?")
+        root.destroy()
         exit()
 
     while True:
         ret, frame = cap.read()
-        if not ret: break
+        if not ret:
+            break
 
         preprocessed = preprocess(frame)
         edges = make_contours(preprocessed)
         cropped = None
         screen = None
 
-        if not screen_roi: screen_roi = find_screen_roi(edges)
-        if screen_roi: cropped = draw_screen_roi(frame, screen_roi)
+        if not screen_roi:
+            screen_roi = find_screen_roi(edges)
+        if screen_roi:
+            cropped = draw_screen_roi(frame, screen_roi)
 
         if cropped is not None:
             screen = preprocess_screen_roi(cropped)
 
         if screen is not None:
             values, digits_img = analyze_digits.analyze_digits(screen)
-            for v in values:
-                if v is not None:
-                    print(v)
+
+            # Ensure there are enough labels for each row
+            while len(labels) < len(values):
+                lbl = tk.Label(root, text="", font=("Arial", 16))
+                lbl.pack(anchor="w")
+                labels.append(lbl)
+
+            # Update label text for each row
+            for i, val in enumerate(values):
+                text = val if val is not None else "?"
+                labels[i].config(text=f"Row {i + 1}: {text}")
+
+            # Any extra labels beyond detected rows show '?'
+            for i in range(len(values), len(labels)):
+                labels[i].config(text=f"Row {i + 1}: ?")
+
             cv2.imshow("Digits Detected", digits_img)
 
         draw_reticle(frame)
@@ -98,10 +121,15 @@ def main():
         if screen is not None:
             cv2.imshow("Screen ROI Preprocessed", screen)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'): break
+        root.update_idletasks()
+        root.update()
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
     cap.release()
     cv2.destroyAllWindows()
+    root.destroy()
 
 if __name__ == '__main__':
     main()
