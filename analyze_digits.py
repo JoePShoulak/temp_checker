@@ -7,9 +7,7 @@ MAX_AREA = 1000
 FINAL_MIN_AREA = 200
 MERGE_DISTANCE = 5
 WHITE_THRESHOLD = 200
-DOT_COLOR = (0, 0, 255)       # Red
-DOT_RADIUS = 2
-DOT_THICKNESS = -1
+ROW_Y_TOLERANCE = 10  # pixels to consider same row
 # --------------------------------------------
 
 # Segment bitstring -> digit
@@ -111,61 +109,76 @@ boxes = merge_boxes_by_condition(boxes, lambda a, b: is_close(a, b, MERGE_DISTAN
 
 # Final filtering
 filtered_boxes = [b for b in boxes if box_area(b) >= FINAL_MIN_AREA]
-filtered_boxes.sort(key=lambda b: b[0])  # sort left-to-right
 
-output = img.copy()
-recognized_digits = ""
+# Sort all boxes top-to-bottom, then left-to-right
+filtered_boxes.sort(key=lambda b: (b[1], b[0]))
 
+# Remove the first box globally
+if filtered_boxes:
+    filtered_boxes = filtered_boxes[1:]
+
+# Group remaining boxes into rows
+rows = []
 for box in filtered_boxes:
     x1, y1, x2, y2 = box
-    cx = (x1 + x2) // 2
-    top_y = y1 + (y2 - y1) // 3
-    bot_y = y1 + 2 * (y2 - y1) // 3
-    top_dot = (cx, top_y)
-    bot_dot = (cx, bot_y)
+    placed = False
+    for row in rows:
+        if abs(y1 - row[0][1]) <= ROW_Y_TOLERANCE:
+            row.append(box)
+            placed = True
+            break
+    if not placed:
+        rows.append([box])
 
-    # Draw bounding box and dots
+# Draw boxes on image
+output = img.copy()
+for box in filtered_boxes:
+    x1, y1, x2, y2 = box
     cv2.rectangle(output, (x1, y1), (x2, y2), (0, 255, 0), 1)
-    cv2.circle(output, top_dot, DOT_RADIUS, DOT_COLOR, DOT_THICKNESS)
-    cv2.circle(output, bot_dot, DOT_RADIUS, DOT_COLOR, DOT_THICKNESS)
 
-    # Segment detections via cardinal lines
-    top_up = has_white_pixels_along_line(gray, top_dot, "up", (x1, y1, x2, y2))
-    top_left = has_white_pixels_along_line(gray, top_dot, "left", (x1, y1, x2, y2))
-    top_right = has_white_pixels_along_line(gray, top_dot, "right", (x1, y1, x2, y2))
+# Process and print results row-by-row
+for row in rows:
+    row.sort(key=lambda b: b[0])  # sort left to right
+    number_str = ""
+    for box in row:
+        x1, y1, x2, y2 = box
+        cx = (x1 + x2) // 2
+        top_y = y1 + (y2 - y1) // 3
+        bot_y = y1 + 2 * (y2 - y1) // 3
+        top_dot = (cx, top_y)
+        bot_dot = (cx, bot_y)
 
-    bot_down = has_white_pixels_along_line(gray, bot_dot, "down", (x1, y1, x2, y2))
-    bot_left = has_white_pixels_along_line(gray, bot_dot, "left", (x1, y1, x2, y2))
-    bot_right = has_white_pixels_along_line(gray, bot_dot, "right", (x1, y1, x2, y2))
+        # Segment detections via cardinal lines
+        top_up = has_white_pixels_along_line(gray, top_dot, "up", (x1, y1, x2, y2))
+        top_left = has_white_pixels_along_line(gray, top_dot, "left", (x1, y1, x2, y2))
+        top_right = has_white_pixels_along_line(gray, top_dot, "right", (x1, y1, x2, y2))
 
-    center = has_white_between_dots(gray, top_dot, bot_dot)
+        bot_down = has_white_pixels_along_line(gray, bot_dot, "down", (x1, y1, x2, y2))
+        bot_left = has_white_pixels_along_line(gray, bot_dot, "left", (x1, y1, x2, y2))
+        bot_right = has_white_pixels_along_line(gray, bot_dot, "right", (x1, y1, x2, y2))
 
-    # Construct bitstring and infer digit
-    bitstring = (
-        ("1" if top_up else "0") +        # a
-        ("1" if top_right else "0") +     # b
-        ("1" if bot_right else "0") +     # c
-        ("1" if bot_down else "0") +      # d
-        ("1" if bot_left else "0") +      # e
-        ("1" if top_left else "0") +      # f
-        ("1" if center else "0")          # g
-    )
-    digit = SEGMENT_DIGITS.get(bitstring, "?")
-    recognized_digits += digit
+        center = has_white_between_dots(gray, top_dot, bot_dot)
 
-    # Display on image
-    cv2.putText(output, digit, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 1)
+        bitstring = (
+            ("1" if top_up else "0") +
+            ("1" if top_right else "0") +
+            ("1" if bot_right else "0") +
+            ("1" if bot_down else "0") +
+            ("1" if bot_left else "0") +
+            ("1" if top_left else "0") +
+            ("1" if center else "0")
+        )
+        digit = SEGMENT_DIGITS.get(bitstring, "?")
+        number_str += digit
 
-    # Print debug info
-    print(f"Digit at box {box}:")
-    print(f"  Segment bitstring: {bitstring} -> {digit}")
-    print(f"    Top Dot   - UP={top_up}, LEFT={top_left}, RIGHT={top_right}")
-    print(f"    Bottom Dot- DOWN={bot_down}, LEFT={bot_left}, RIGHT={bot_right}")
-    print(f"    Center Segment: {center}")
-    print()
+    # Convert to number and divide by 10
+    if "?" not in number_str and number_str:
+        result = int(number_str) / 10
+        print(result)
+    else:
+        print("?", number_str)
 
-print("Recognized Digits (left to right):", recognized_digits)
-
-cv2.imshow("Detected Digits", output)
+# Show image with bounding boxes
+cv2.imshow("Final Digit Bounding Boxes", output)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
